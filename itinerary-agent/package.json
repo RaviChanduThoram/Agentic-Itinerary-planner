@@ -1,0 +1,26 @@
+{
+  "name": "itinerary-agent",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "tsx watch server.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/node": "^25.1.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@tavily/core": "^0.7.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "openai": "^6.17.0",
+    "zod": "^4.3.6"
+  }
+}
