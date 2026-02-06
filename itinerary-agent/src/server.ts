@@ -1,12 +1,12 @@
-import cors from "cors";
 import "dotenv/config";
+
+import cors from "cors";
 import express from "express";
 import { z } from "zod";
 import { planFromIntake } from "./planFromIntake";
 
 const app = express();
 
-// If you use Vite proxy, CORS is optional. But keeping it on is fine.
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
@@ -18,7 +18,15 @@ const IntakeSchema = z.object({
   pace: z.enum(["relaxed", "balanced", "packed"]).default("balanced"),
   budgetLevel: z.enum(["low", "mid", "high"]).default("mid"),
   constraints: z.array(z.string()).default([]),
-  interests: z.array(z.string()).default([])
+  interests: z.array(z.string()).default([]),
+
+  // Optional Hotels module (no pricing yet)
+  hotels: z
+    .object({
+      enabled: z.boolean().default(false),
+      maxHotels: z.number().int().min(1).max(20).optional()
+    })
+    .optional()
 });
 
 app.get("/health", (_req, res) => res.json({ ok: true }));

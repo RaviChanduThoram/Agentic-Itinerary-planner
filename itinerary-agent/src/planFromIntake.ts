@@ -1,3 +1,4 @@
+import { getHotelsForCity, resolvePlacesMedia, type HotelOption } from "./images";
 import { generateItineraryOptionB, parseJsonObjectSafe, reviseItineraryJson } from "./llm";
 import type { Candidate, Itinerary, TripRequest } from "./schema";
 import { ItinerarySchema, TripRequestSchema } from "./schema";
@@ -83,6 +84,33 @@ function toUiItinerary(itinerary: any) {
   };
 }
 
+function collectPlacesFromUiItinerary(ui: any): string[] {
+  const places: string[] = [];
+  for (const day of ui?.days ?? []) {
+    for (const item of day?.timeline ?? []) {
+      if (item?.kind === "activity" && item.title) places.push(String(item.title));
+      if (item?.kind === "meal" && item.place) places.push(String(item.place));
+    }
+  }
+  return places;
+}
+
+function attachMediaToUiItinerary(ui: any, mediaMap: Record<string, any>) {
+  for (const day of ui?.days ?? []) {
+    for (const item of day?.timeline ?? []) {
+      const key = item?.kind === "meal" ? item.place : item.title;
+      const media = key ? mediaMap[key] : null;
+      if (!media) continue;
+
+      // Keep this additive (never mutate title/place).
+      item.imageUrls = Array.isArray(media.imageUrls) ? media.imageUrls : [];
+      if (typeof media.rating === "number") item.rating = media.rating;
+      if (typeof media.userRatingsTotal === "number") item.userRatingsTotal = media.userRatingsTotal;
+      if (typeof media.mapsUrl === "string") item.mapsUrl = media.mapsUrl;
+    }
+  }
+}
+
 export async function planFromIntake(input: {
   destination: string;
   startDate: string;
@@ -92,6 +120,10 @@ export async function planFromIntake(input: {
   budgetLevel: "low" | "mid" | "high";
   constraints: string[];
   interests: string[];
+  hotels?: {
+    enabled: boolean;
+    maxHotels?: number;
+  };
 }) {
   // inclusive day count
   const start = new Date(input.startDate + "T00:00:00");
@@ -153,8 +185,39 @@ export async function planFromIntake(input: {
   }
 
   // Final response shape the frontend expects
+  const itineraryUi = toUiItinerary(itinerary);
+
+  // Enrich itinerary places with media (images + ratings)
+  try {
+    const places = collectPlacesFromUiItinerary(itineraryUi);
+    const mediaMap = await resolvePlacesMedia({
+      city: trip.destination,
+      places,
+      maxImagesPerPlace: 5,
+      concurrency: 6
+    });
+    attachMediaToUiItinerary(itineraryUi, mediaMap);
+  } catch {
+    // Media enrichment should never fail the itinerary.
+  }
+
+  // Optional hotels module
+  let hotels: HotelOption[] = [];
+  if (input.hotels?.enabled) {
+    try {
+      hotels = await getHotelsForCity({
+        city: trip.destination,
+        maxHotels: input.hotels.maxHotels ?? 10,
+        maxImagesPerHotel: 7
+      });
+    } catch {
+      hotels = [];
+    }
+  }
+
   return {
-    itinerary: toUiItinerary(itinerary),
+    itinerary: itineraryUi,
+    hotels,
     allowedLists: { allowedAttractions, allowedRestaurants, allowedIndoorBackups },
     validation
   };

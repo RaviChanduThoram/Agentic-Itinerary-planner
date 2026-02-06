@@ -57,14 +57,11 @@ function extractFirstJsonArray(raw: string): any[] {
   return JSON.parse(extractFirstJsonSlice(raw, "[", "]"));
 }
 
-async function fixJsonOnly(
-  raw: string,
-  mode: "object" | "array"
-): Promise<string> {
+async function fixJsonOnly(raw: string, mode: "object" | "array"): Promise<string> {
   const instruction = `
 You are a JSON repair assistant.
 Return ONLY valid JSON ${mode === "array" ? "array" : "object"}.
-No markdown. No commentary.
+No markdown, no commentary.
 `.trim();
 
   const response = await client.chat.completions.create({
@@ -99,14 +96,14 @@ export async function parseJsonArraySafe(raw: string): Promise<any[]> {
 }
 
 /* ============================================================
-   TripRequest extraction
+   TripRequest extractor
    ============================================================ */
 
 export async function extractTripRequest(userPrompt: string): Promise<string> {
   const instruction = `
 Extract TripRequest from the user prompt.
 
-Return ONLY valid JSON.
+Return ONLY valid JSON. No markdown. No commentary.
 
 Keys EXACTLY:
 destination,
@@ -120,14 +117,14 @@ constraints,
 missingInfoQuestions
 
 Rules:
-- "X-day trip" => tripLengthDays = X
-- "weekend" => tripLengthDays = 2
-- If trip length missing => default 3 + ask one question
-- If dates missing => start/end = null + ask one question
-- travelers default = 1
-- budgetLevel default = "mid"
-- pace default = "balanced"
-- interests/constraints can be empty arrays
+- If user says "X-day trip" or "X days" => tripLengthDays = X.
+- If user says "weekend" => tripLengthDays = 2.
+- If trip length missing => tripLengthDays = 3 and add ONE question asking how many days.
+- If dates missing => start/end = null and add ONE question asking dates.
+- If travelers missing => 1.
+- If budgetLevel missing => "mid".
+- If pace missing => "balanced".
+- interests and constraints can be empty arrays.
 `.trim();
 
   const response = await client.chat.completions.create({
@@ -144,10 +141,10 @@ Rules:
 }
 
 /* ============================================================
-   Candidate extraction (supports BOTH call styles)
+   Candidates extractor (supports BOTH calling styles)
    ============================================================ */
 
-// Overloads
+// Overloads:
 export async function extractCandidatesFromSearchResults(
   category: Candidate["category"],
   results: TavilyResult[],
@@ -159,7 +156,7 @@ export async function extractCandidatesFromSearchResults(input: {
   city: string;
 }): Promise<string>;
 
-// Implementation
+// Implementation:
 export async function extractCandidatesFromSearchResults(
   a:
     | Candidate["category"]
@@ -172,19 +169,20 @@ export async function extractCandidatesFromSearchResults(
   const city = typeof a === "string" ? (c ?? "") : a.city;
 
   const instruction = `
-You extract REAL venue/place names from web search results.
+You extract real venue/place names from web search results.
 
-Return ONLY valid JSON ARRAY.
+Return ONLY valid JSON ARRAY. No text.
 
 Each item:
 { "name": string, "category": "${category}", "url": string, "notes": string }
 
-Rules:
-- name MUST be an actual place (no listicles, no guides)
-- Exclude names containing: best, top, guide, updated, things to do, restaurants in
-- Prefer venues that plausibly exist in city: "${city}"
-- If a snippet mentions multiple places, extract multiple items
-- notes: short descriptor only
+Hard rules:
+- name MUST be an actual venue/activity name (not article title, not guide, not question).
+- Exclude names containing: best, top, guide, updated, things to do, restaurants in, what's the best.
+- Prefer venues that plausibly exist in city: "${city}".
+- If snippet lists multiple places, extract multiple candidates from one result.
+- url must be the source result url.
+- notes: short (e.g., "vegan sushi", "museum", "indoor activity").
 `.trim();
 
   const response = await client.chat.completions.create({
@@ -228,11 +226,16 @@ You are a travel itinerary generator.
 Return ONLY valid JSON object with:
 summary, days, mustBook, rainBackups
 
-STRICT RULES:
-- blocks[].title MUST be exactly one of allowedAttractions
-- meals MUST use only allowedRestaurants
-- rainBackups MUST use only allowedIndoorBackups
-- If you use anything else, the output is INVALID
+STRICT RULES (NON-NEGOTIABLE):
+- blocks[] are ATTRACTIONS ONLY. NEVER put restaurants in blocks.
+- blocks[].title MUST be exactly one of allowedAttractions (string match).
+- meals are MEALS ONLY. Meals MUST use only allowedRestaurants (string match).
+- Each meal dish MUST clearly indicate vegetarian/vegan by including "(Vegetarian)" or "(Vegan)" in the dish text.
+  Format each meal exactly:
+    "Lunch: <Restaurant> - <Dish> (Vegetarian)"
+    "Dinner: <Restaurant> - <Dish> (Vegan)"
+- rainBackups MUST use only allowedIndoorBackups (string match).
+- If you use anything else, the output is INVALID.
 
 Structure per day:
 {
@@ -240,8 +243,8 @@ Structure per day:
   theme,
   blocks: [{ time, title, details }],
   meals: [
-    "Lunch: <Restaurant> - <veg dish>",
-    "Dinner: <Restaurant> - <veg dish>"
+    "Lunch: <Restaurant> - <Dish> (Vegetarian)",
+    "Dinner: <Restaurant> - <Dish> (Vegan)"
   ],
   notes: [at least 2]
 }
@@ -320,10 +323,20 @@ You are an itinerary reviser.
 Return ONLY valid JSON Itinerary object.
 
 NON-NEGOTIABLE RULES:
-- blocks[].title MUST be exactly one of allowedAttractions
-- meals MUST use only allowedRestaurants
-- rainBackups MUST use only allowedIndoorBackups
-- DO NOT invent new places
+- blocks[] are ATTRACTIONS ONLY. NEVER put restaurants in blocks.
+- blocks[].title MUST be exactly one of allowedAttractions (string match).
+- meals are MEALS ONLY. Meals MUST use only allowedRestaurants (string match).
+- Each meal dish MUST include "(Vegetarian)" or "(Vegan)" so it is explicit.
+  Format each meal exactly:
+    "Lunch: <Restaurant> - <Dish> (Vegetarian)"
+    "Dinner: <Restaurant> - <Dish> (Vegan)"
+- rainBackups MUST use only allowedIndoorBackups (string match).
+- DO NOT invent new places.
+
+REPAIR RULES:
+- If a block title is a restaurant (in allowedRestaurants) or not in allowedAttractions, replace it with an item FROM allowedAttractions.
+- If a meal restaurant is invalid, replace with an item FROM allowedRestaurants.
+- If the meal dish is missing (Vegetarian)/(Vegan), add it.
 
 FIX STRATEGY:
 If a place is invalid:
@@ -344,7 +357,7 @@ SCHEMA REQUIREMENTS:
       { role: "user", content: JSON.stringify(args) }
     ],
     max_tokens: 1900,
-    temperature: 0
+    temperature: 0.2
   });
 
   return response.choices[0].message.content ?? "";
